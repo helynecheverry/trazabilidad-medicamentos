@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { normalizarCodigo, consultarLote } from './loteService';
 import { formatoFecha, condicionLegible, acortarDireccion, decodificarCodigo } from './format';
-import { CONTRACT_ADDRESS } from './contract';
+import { CONTRACT_ADDRESS, traza, conectarWallet } from './contract';
+import { formatEther } from 'ethers';
 
 function parsearCondicion(condicionCruda) {
   let texto = '';
@@ -10,8 +11,6 @@ function parsearCondicion(condicionCruda) {
   } catch {
     texto = String(condicionCruda || '');
   }
-
-  // Formato empaquetado: ALERTA|T..|A..|M..
   if (typeof texto === 'string' && texto.includes('|')) {
     const partes = texto.split('|');
     const alerta = partes[0] || 'ALERTA';
@@ -24,9 +23,8 @@ function parsearCondicion(condicionCruda) {
     }
     return { tipo: 'sensores', alerta, temp, acel, mov, esAlerta: true };
   }
-
   const t = String(texto);
-  const esAlerta = t !== 'OK';
+  const esAlerta = t !== 'OK' && t !== 'ENTREGADO-OK';
   const etiqueta = t === 'DANADO' ? 'DAÑADO' : t;
   return { tipo: 'simple', etiqueta, esAlerta };
 }
@@ -37,10 +35,17 @@ export default function App() {
   const [error, setError] = useState(null);
   const [resultado, setResultado] = useState(null);
 
+  const [wallet, setWallet] = useState(null);
+  const [pago, setPago] = useState(null);
+  const [txMsg, setTxMsg] = useState(null);
+  const [liberando, setLiberando] = useState(false);
+
   async function buscar(event) {
     event.preventDefault();
     setError(null);
     setResultado(null);
+    setPago(null);
+    setTxMsg(null);
     try {
       setCargando(true);
       const codigo = normalizarCodigo(codigoInput);
@@ -49,7 +54,10 @@ export default function App() {
         setError(`El lote ${codigoInput} no está registrado en la cadena.`);
         return;
       }
-      setResultado(datos);
+      setResultado({ ...datos, codigoBytes: codigo });
+      // Leer estado del pago
+      const est = await traza.estadoPago(codigo);
+      setPago({ tuvoDano: est[0], pagoLiberado: est[1], montoEscrow: est[2] });
     } catch (err) {
       const mensaje = err?.reason ?? err?.message ?? String(err);
       setError(/network|connection|fetch|timeout|json-rpc|not found|ECONN/i.test(mensaje)
@@ -60,31 +68,64 @@ export default function App() {
     }
   }
 
-    const eventosOrdenados = resultado?.eventos
+  async function handleConectar() {
+    try {
+      const { direccion } = await conectarWallet();
+      setWallet(direccion);
+      setTxMsg(null);
+    } catch (e) {
+      setTxMsg({ tipo: 'error', texto: e.message });
+    }
+  }
+
+  async function handleLiberarPago() {
+    if (!wallet) {
+      setTxMsg({ tipo: 'error', texto: 'Conecta tu wallet primero.' });
+      return;
+    }
+    try {
+      setLiberando(true);
+      setTxMsg({ tipo: 'info', texto: 'Confirma la transacción en MetaMask…' });
+      const { contratoConFirma } = await conectarWallet();
+      const tx = await contratoConFirma.confirmarEntrega(resultado.codigoBytes);
+      setTxMsg({ tipo: 'info', texto: 'Liberando pago… esperando confirmación.' });
+      await tx.wait();
+      setTxMsg({ tipo: 'ok', texto: '✅ Pago liberado al fabricante correctamente.' });
+      // refrescar estado
+      const est = await traza.estadoPago(resultado.codigoBytes);
+      setPago({ tuvoDano: est[0], pagoLiberado: est[1], montoEscrow: est[2] });
+    } catch (e) {
+      const msg = e?.reason ?? e?.shortMessage ?? e?.message ?? String(e);
+      setTxMsg({ tipo: 'error', texto: `No se pudo liberar: ${msg}` });
+    } finally {
+      setLiberando(false);
+    }
+  }
+
+  const eventosOrdenados = resultado?.eventos
     ? resultado.eventos.map((ev, i) => ({ ev, i })).reverse().slice(0, 10)
     : [];
 
   return (
     <div className="contenedor">
       <header className="encabezado">
+        <div className="topbar">
+          {wallet
+            ? <span className="wallet-conectada">🟢 {acortarDireccion(wallet)}</span>
+            : <button className="btn-wallet" onClick={handleConectar}>Conectar Wallet</button>}
+        </div>
         <h1>Trazabilidad de Medicamentos</h1>
         <p className="subtitulo">
-          Cadena de custodia e integridad registrada en HashKey Chain Testnet.
+          Cadena de custodia, integridad y pago verificado en HashKey Chain Testnet.
         </p>
       </header>
 
       <form className="buscador" onSubmit={buscar}>
         <label htmlFor="codigo">Código del lote (UID del tag RFID)</label>
         <div className="fila-buscador">
-          <input
-            id="codigo"
-            type="text"
-            value={codigoInput}
+          <input id="codigo" type="text" value={codigoInput}
             onChange={(e) => setCodigoInput(e.target.value)}
-            placeholder="LOTE-VACUNA-001"
-            autoComplete="off"
-            spellCheck="false"
-          />
+            placeholder="LOTE-VACUNA-001" autoComplete="off" spellCheck="false" />
           <button type="submit" disabled={cargando}>
             {cargando ? 'Consultando…' : 'Consultar'}
           </button>
@@ -106,47 +147,51 @@ export default function App() {
             </div>
           </div>
 
+          {pago && (
+            <div className={`pago-card ${pago.pagoLiberado ? 'pago-liberado' : pago.tuvoDano ? 'pago-retenido' : 'pago-pendiente'}`}>
+              <div className="pago-titulo">Estado del pago (Escrow)</div>
+              {pago.pagoLiberado ? (
+                <div className="pago-estado ok">✅ Pago liberado al fabricante — entrega verificada.</div>
+              ) : pago.tuvoDano ? (
+                <div className="pago-estado danger">⚠️ Pago RETENIDO — se detectaron daños en el transporte. El contrato bloquea la liberación.</div>
+              ) : (
+                <>
+                  <div className="pago-estado pend">
+                    💰 Escrow retenido: {formatEther(pago.montoEscrow)} HSK — sin daños detectados.
+                  </div>
+                  <button className="btn-liberar" onClick={handleLiberarPago} disabled={liberando}>
+                    {liberando ? 'Procesando…' : 'Confirmar entrega y liberar pago'}
+                  </button>
+                </>
+              )}
+              {txMsg && <div className={`tx-msg ${txMsg.tipo}`}>{txMsg.texto}</div>}
+            </div>
+          )}
+
           <div className="timeline">
             {eventosOrdenados.map(({ ev, i }, pos) => {
               const cond = parsearCondicion(ev.condicion);
               const esUltimo = pos === 0;
               return (
                 <div key={i} className={`evento ${cond.esAlerta ? 'evento-alerta' : 'evento-ok'} ${esUltimo ? 'evento-ultimo' : ''}`}>
-                  <div className="evento-linea">
-                    <div className="evento-punto"></div>
-                  </div>
+                  <div className="evento-linea"><div className="evento-punto"></div></div>
                   <div className="evento-card">
                     <div className="evento-top">
                       <span className="evento-num">#{i + 1}</span>
                       {esUltimo && <span className="badge-ultimo">ÚLTIMO</span>}
                       <span className="evento-fecha">{formatoFecha(ev.timestamp)}</span>
                     </div>
-
                     {cond.tipo === 'sensores' ? (
                       <>
                         <div className={`evento-alerta-tag ${cond.esAlerta ? 'tag-rojo' : ''}`}>{cond.alerta}</div>
                         <div className="sensores">
-                          <div className="sensor">
-                            <span className="sensor-icono">🌡️</span>
-                            <span className="sensor-valor">{cond.temp}°C</span>
-                            <span className="sensor-label">Temperatura</span>
-                          </div>
-                          <div className="sensor">
-                            <span className="sensor-icono">📊</span>
-                            <span className="sensor-valor">{cond.acel}</span>
-                            <span className="sensor-label">Aceleración</span>
-                          </div>
-                          <div className="sensor">
-                            <span className="sensor-icono">🚶</span>
-                            <span className="sensor-valor">{cond.mov === '0' ? 'No' : 'Sí'}</span>
-                            <span className="sensor-label">Movimiento</span>
-                          </div>
+                          <div className="sensor"><span className="sensor-icono">🌡️</span><span className="sensor-valor">{cond.temp}°C</span><span className="sensor-label">Temperatura</span></div>
+                          <div className="sensor"><span className="sensor-icono">📊</span><span className="sensor-valor">{cond.acel}</span><span className="sensor-label">Aceleración</span></div>
+                          <div className="sensor"><span className="sensor-icono">🚶</span><span className="sensor-valor">{cond.mov === '0' ? 'No' : 'Sí'}</span><span className="sensor-label">Movimiento</span></div>
                         </div>
                       </>
                     ) : (
-                      <div className={`evento-simple ${cond.esAlerta ? 'tag-rojo' : 'tag-verde'}`}>
-                        {cond.etiqueta}
-                      </div>
+                      <div className={`evento-simple ${cond.esAlerta ? 'tag-rojo' : 'tag-verde'}`}>{cond.etiqueta}</div>
                     )}
                   </div>
                 </div>

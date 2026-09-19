@@ -238,3 +238,22 @@ code { font-family: "SF Mono", "Roboto Mono", monospace; color: var(--acento); f
   .lote-meta { text-align: left; }
   .sensores { grid-template-columns: 1fr; }
 }
+
+.topbar { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+.btn-wallet { padding: 10px 18px; border: none; border-radius: 10px; background: linear-gradient(120deg, var(--acento), var(--acento2)); color: #fff; font-weight: 700; cursor: pointer; }
+.wallet-conectada { background: rgba(52,211,153,.15); color: var(--ok); padding: 8px 14px; border-radius: 999px; font-size: 13px; font-weight: 600; border: 1px solid var(--ok); }
+.pago-card { background: var(--panel); border: 1px solid var(--borde); border-radius: 14px; padding: 20px; margin-bottom: 24px; }
+.pago-liberado { border-color: var(--ok); }
+.pago-retenido { border-color: var(--alerta); }
+.pago-pendiente { border-color: var(--acento); }
+.pago-titulo { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--tenue); margin-bottom: 12px; font-weight: 700; }
+.pago-estado { font-size: 15px; margin-bottom: 14px; }
+.pago-estado.ok { color: var(--ok); }
+.pago-estado.danger { color: var(--alerta); }
+.pago-estado.pend { color: var(--texto); }
+.btn-liberar { padding: 14px 24px; border: none; border-radius: 12px; background: linear-gradient(120deg, var(--ok), #22a06b); color: #fff; font-weight: 700; font-size: 15px; cursor: pointer; width: 100%; }
+.btn-liberar:disabled { opacity: .5; }
+.tx-msg { margin-top: 12px; padding: 10px 14px; border-radius: 8px; font-size: 14px; }
+.tx-msg.info { background: rgba(91,157,255,.12); color: var(--acento); }
+.tx-msg.ok { background: rgba(52,211,153,.12); color: var(--ok); }
+.tx-msg.error { background: rgba(251,91,109,.12); color: var(--alerta); }
