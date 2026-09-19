@@ -1,0 +1,10 @@
+schema: spec-driven
+
+context: |
+  Proyecto: Frontend de trazabilidad de medicamentos para un hackathon.
+  El frontend debe crearse DENTRO de la carpeta 'frontend/' de este proyecto.
+  Stack: React + Vite (JavaScript, no TypeScript), librería ethers v6.
+  Solo lectura de un contrato inteligente ya desplegado; sin backend ni base de datos.
+  Red: HashKey Chain Testnet, RPC https://testnet.hsk.xyz
+  Contrato: 0x50cB8085f4529E4E2B40128314Cc41fF896cd2F8
+  El texto de la interfaz va en español. CSS simple, sin librerías de UI pesadas.
