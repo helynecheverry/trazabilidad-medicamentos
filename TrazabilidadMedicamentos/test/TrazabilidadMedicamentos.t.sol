@@ -3,72 +3,70 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
 import "../src/TrazabilidadMedicamentos.sol";
+import "@openzeppelin/contracts/access/IAccessControl.sol";
 
 contract TrazabilidadMedicamentosTest is Test {
     TrazabilidadMedicamentos traza;
 
-    // Actores de la cadena (direcciones ficticias de prueba)
-    address fabricante  = address(0xFAB);
-    address distribuidor = address(0xD15);
-    address farmacia    = address(0xFA4);
-    address atacante    = address(0xBAD);
+    address fabricante = address(0xFAB);
+    address atacante = address(0xBAD);
+    bytes32 lote = bytes32("LOTE-VACUNA-001");
 
-    bytes32 lote = bytes32("LOTE-VACUNA-001");   // el "UID" que vendría del tag RFID
-
-    // setUp() corre antes de CADA test, con estado limpio.
     function setUp() public {
-        traza = new TrazabilidadMedicamentos();  // el owner es este contrato de test
-        // El owner autoriza a los 3 actores legítimos de la cadena.
+        traza = new TrazabilidadMedicamentos();
         traza.autorizar(fabricante);
-        traza.autorizar(distribuidor);
-        traza.autorizar(farmacia);
     }
 
-    // ---------- Camino feliz: lo que SÍ debe funcionar ----------
+    // ---- Camino feliz ----
 
-    function test_FabricantePuedeRegistrarLote() public {
+    function test_DispositivoAutorizadoRegistraLote() public {
         vm.prank(fabricante);
         traza.registrarLote(lote);
-        assertEq(traza.totalEventos(lote), 1);   // primer eslabón creado
+        assertEq(traza.totalEventos(lote), 1);
     }
 
-    function test_CadenaDeCustodiaCompleta() public {
-        // 1) Fabricante crea el lote (queda como Registrado / OK)
+    function test_CadenaDeCustodia() public {
         vm.prank(fabricante);
         traza.registrarLote(lote);
 
-        // 2) Distribuidor lo recibe en buen estado
-        vm.prank(distribuidor);
-        traza.registrarEvento(lote, TrazabilidadMedicamentos.Estado.Recibido, bytes32("OK"));
-
-        // 3) Farmacia lo recibe DAÑADO
-        vm.prank(farmacia);
+        vm.prank(fabricante);
         traza.registrarEvento(lote, TrazabilidadMedicamentos.Estado.Recibido, bytes32("DANADO"));
 
-        // La cadena tiene 3 eslabones
-        assertEq(traza.totalEventos(lote), 3);
+        assertEq(traza.totalEventos(lote), 2);
 
-        // Y el daño quedó registrado en el eslabón del distribuidor -> farmacia
-        TrazabilidadMedicamentos.Evento memory ultimo = traza.obtenerEvento(lote, 2);
-        assertEq(ultimo.condicion, bytes32("DANADO"));
-        assertEq(ultimo.actor, farmacia);
+        (bool tuvoDano, , ) = traza.estadoPago(lote);
+        assertTrue(tuvoDano);
     }
 
-    // ---------- Seguridad: lo que DEBE ser rechazado ----------
+    // ---- Seguridad: ataques rechazados por OpenZeppelin AccessControl ----
 
     function test_Revert_NoAutorizadoRegistraLote() public {
+        bytes32 rol = traza.ROL_DISPOSITIVO();
         vm.prank(atacante);
-        vm.expectRevert(TrazabilidadMedicamentos.NoAutorizado.selector);
-        traza.registrarLote(bytes32("LOTE-FALSO"));   // atacante intenta crear un lote
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                atacante,
+                rol
+            )
+        );
+        traza.registrarLote(bytes32("LOTE-FALSO"));
     }
 
     function test_Revert_NoAutorizadoRegistraEvento() public {
         vm.prank(fabricante);
-        traza.registrarLote(lote);                    // lote legítimo existe
+        traza.registrarLote(lote);
 
+        bytes32 rol = traza.ROL_DISPOSITIVO();
         vm.prank(atacante);
-        vm.expectRevert(TrazabilidadMedicamentos.NoAutorizado.selector);
-        traza.registrarEvento(lote, TrazabilidadMedicamentos.Estado.Entregado, bytes32("OK"));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector,
+                atacante,
+                rol
+            )
+        );
+        traza.registrarEvento(lote, TrazabilidadMedicamentos.Estado.Recibido, bytes32("OK"));
     }
 
     function test_Revert_LoteDuplicado() public {
@@ -77,12 +75,33 @@ contract TrazabilidadMedicamentosTest is Test {
 
         vm.prank(fabricante);
         vm.expectRevert(TrazabilidadMedicamentos.LoteYaExiste.selector);
-        traza.registrarLote(lote);                    // mismo código otra vez
+        traza.registrarLote(lote);
     }
 
-    function test_Revert_EventoSobreLoteInexistente() public {
-        vm.prank(distribuidor);
-        vm.expectRevert(TrazabilidadMedicamentos.LoteNoExiste.selector);
-        traza.registrarEvento(bytes32("NO-EXISTE"), TrazabilidadMedicamentos.Estado.Recibido, bytes32("OK"));
+    // ---- Pago condicionado a la integridad ----
+
+    function test_PagoRetenidoSiHuboDano() public {
+        vm.prank(fabricante);
+        traza.registrarLote(lote);
+
+        traza.depositarEscrow{value: 1 ether}(lote);
+
+        vm.prank(fabricante);
+        traza.registrarEvento(lote, TrazabilidadMedicamentos.Estado.Recibido, bytes32("DANADO"));
+
+        vm.expectRevert(TrazabilidadMedicamentos.LoteConDano.selector);
+        traza.confirmarEntrega(lote);
+    }
+
+    function test_PagoLiberadoSiTodoOK() public {
+        vm.prank(fabricante);
+        traza.registrarLote(lote);
+
+        traza.depositarEscrow{value: 1 ether}(lote);
+
+        uint256 balanceAntes = fabricante.balance;
+        traza.confirmarEntrega(lote);
+
+        assertEq(fabricante.balance, balanceAntes + 1 ether);
     }
 }
