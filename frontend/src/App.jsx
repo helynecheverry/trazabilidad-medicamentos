@@ -1,8 +1,21 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { normalizarCodigo, consultarLote } from './loteService';
 import { formatoFecha, condicionLegible, acortarDireccion, decodificarCodigo } from './format';
 import { CONTRACT_ADDRESS, traza, conectarWallet } from './contract';
 import { formatEther } from 'ethers';
+
+function Icono({ nombre, ...props }) {
+  const trazos = {
+    cruz: <path d="M9 3h6v6h6v6h-6v6H9v-6H3V9h6z" />,
+    buscar: <><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></>,
+    wallet: <><path d="M20 8V5H5a2 2 0 0 0 0 4h16v11H5a2 2 0 0 1-2-2V7" /><path d="M21 12h-6v5h6" /></>,
+    caja: <><path d="m12 3 9 5v9l-9 5-9-5V8zM3 8l9 5 9-5M12 13v9M7.5 5.5l9 5" /></>,
+    escudo: <><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6z" /><path d="m8 12 3 3 5-6" /></>,
+    ruta: <><circle cx="5" cy="5" r="2" /><circle cx="19" cy="19" r="2" /><path d="M7 5h9a4 4 0 0 1 0 8H8a3 3 0 0 0 0 6h9" /></>,
+    actividad: <path d="M2 12h5l3-8 4 16 3-8h5" />,
+  };
+  return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>{trazos[nombre]}</svg>;
+}
 
 function parsearCondicion(condicionCruda) {
   let texto = '';
@@ -108,31 +121,63 @@ export default function App() {
 
   return (
     <div className="contenedor">
-      <header className="encabezado">
-        <div className="topbar">
+      <header className="topbar">
+        <a className="marca" href="#"><span className="marca-icono"><Icono nombre="cruz" /></span><span>Traza<span className="marca-acento">Med</span><small>TRAZABILIDAD FARMACÉUTICA</small></span></a>
+        <div className="topbar-acciones">
+          <span className="red-badge"><span className="estado-punto" />HashKey Testnet</span>
           {wallet
-            ? <span className="wallet-conectada">🟢 {acortarDireccion(wallet)}</span>
-            : <button className="btn-wallet" onClick={handleConectar}>Conectar Wallet</button>}
+            ? <span className="wallet-conectada" title={wallet}><span className="estado-punto" />{acortarDireccion(wallet)}</span>
+            : <button className="btn-wallet" onClick={handleConectar}><Icono nombre="wallet" />Conectar wallet</button>}
         </div>
-        <h1>Trazabilidad de Medicamentos</h1>
-        <p className="subtitulo">
-          Cadena de custodia, integridad y pago verificado en HashKey Chain Testnet.
-        </p>
       </header>
-
-      <form className="buscador" onSubmit={buscar}>
+      <main id="contenido">
+      <section className="encabezado">
+        <div className="hero-texto">
+          <span className="eyebrow"><span className="estado-punto" /> TRANSPARENCIA EN CADA ETAPA</span>
+          <h1>Cada medicamento.<br /><span>Una historia verificable.</span></h1>
+          <p className="subtitulo">Sigue el recorrido de tus medicamentos, verifica su integridad y consulta cada registro de su cadena de custodia.</p>
+          <div className="hero-nota"><Icono nombre="escudo" />Trazabilidad respaldada por blockchain</div>
+        </div>
+        <div className="recorrido" aria-label="Etapas de la cadena de custodia: origen, transporte y entrega">
+          <div className="recorrido-cabecera"><span>CADENA DE CUSTODIA</span><Icono nombre="ruta" /></div>
+          <div className="recorrido-pasos">
+            <div><span className="paso-icono"><Icono nombre="caja" /></span><strong>Origen</strong><small>Fabricante</small></div>
+            <span className="paso-conector" />
+            <div><span className="paso-icono"><Icono nombre="ruta" /></span><strong>Transporte</strong><small>Seguimiento</small></div>
+            <span className="paso-conector" />
+            <div><span className="paso-icono"><Icono nombre="escudo" /></span><strong>Entrega</strong><small>Verificación</small></div>
+          </div>
+          <div className="recorrido-nota">Un recorrido conectado. Un registro compartido.</div>
+        </div>
+      </section>
+      <form className="buscador" onSubmit={buscar} aria-busy={cargando}>
+        <div className="seccion-titulo"><span className="titulo-icono"><Icono nombre="buscar" /></span><div><h2>Consulta un lote</h2><p>La información de tu medicamento, en un solo lugar.</p></div><span className="consulta-badge">CONSULTA PÚBLICA</span></div>
         <label htmlFor="codigo">Código del lote (UID del tag RFID)</label>
         <div className="fila-buscador">
           <input id="codigo" type="text" value={codigoInput}
             onChange={(e) => setCodigoInput(e.target.value)}
-            placeholder="LOTE-VACUNA-001" autoComplete="off" spellCheck="false" />
+            placeholder="Ej. LOTE-VACUNA-001" autoComplete="off" spellCheck="false" aria-describedby="codigo-ayuda" />
           <button type="submit" disabled={cargando}>
-            {cargando ? 'Consultando…' : 'Consultar'}
+            {cargando ? <span className="spinner" /> : <Icono nombre="buscar" />}{cargando ? 'Consultando…' : 'Consultar lote'}
           </button>
         </div>
+        <p id="codigo-ayuda" className="campo-ayuda">Introduce el identificador del lote para consultar sus registros. No necesitas conectar una wallet.</p>
       </form>
-
-      {error && <p className="error">{error}</p>}
+      {error && <p className="error" role="alert">{error}</p>}
+      {txMsg && !pago && <div className={`tx-msg ${txMsg.tipo}`} role="status">{txMsg.texto}</div>}
+      {cargando && <div className="estado-consulta" role="status"><span className="spinner" />Consultando los registros del lote en la cadena…</div>}
+      {!resultado && !cargando && (
+        <section className="estado-inicial">
+          <span className="vacio-icono"><Icono nombre="caja" width="30" height="30" /></span>
+          <h2>El recorrido comienza con un código</h2>
+          <p>Consulta un lote para ver su historial, las condiciones de transporte y el estado de su pago.</p>
+          <div className="funciones">
+            <span><Icono nombre="ruta" />Historial de custodia</span>
+            <span><Icono nombre="actividad" />Condiciones del transporte</span>
+            <span><Icono nombre="escudo" />Estado del pago</span>
+          </div>
+        </section>
+      )}
 
       {resultado?.lote && (
         <section className="lote">
@@ -164,10 +209,12 @@ export default function App() {
                   </button>
                 </>
               )}
-              {txMsg && <div className={`tx-msg ${txMsg.tipo}`}>{txMsg.texto}</div>}
+              {txMsg && <div className={`tx-msg ${txMsg.tipo}`} role="status">{txMsg.texto}</div>}
             </div>
           )}
 
+          <div className="historial-titulo"><h2>Historial de custodia</h2><span>Últimos {eventosOrdenados.length} registros</span></div>
+          {eventosOrdenados.length === 0 && <p className="sin-eventos">Este lote todavía no tiene eventos de custodia registrados.</p>}
           <div className="timeline">
             {eventosOrdenados.map(({ ev, i }, pos) => {
               const cond = parsearCondicion(ev.condicion);
@@ -201,8 +248,10 @@ export default function App() {
         </section>
       )}
 
+      </main>
       <footer className="pie">
-        Red: HashKey Chain Testnet · Contrato: <code>{CONTRACT_ADDRESS}</code>
+        <span><Icono nombre="cruz" />TrazaMed <span className="pie-red">/ HashKey Chain Testnet</span></span>
+        <span className="pie-contrato">Contrato <code>{CONTRACT_ADDRESS}</code></span>
       </footer>
     </div>
   );
